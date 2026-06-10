@@ -2,7 +2,7 @@
 model = "qwen_max"
 
 # 阿里通义千问的apikey，去dashscope获取
-qwen_apikey = ""
+qwen_apikey = "sk-5ab5c09182f74ba986be27330288c8de"
 
 # 你不想用ai回复的人的列表
 name_exclude = []
