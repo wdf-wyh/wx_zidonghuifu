@@ -1,6 +1,9 @@
 # 选用模型，目前只支持千问:qwen_max,qwen_turbo,qwen_plus
 model = "qwen_max"
 
+# 多模态模型（用于识别图片内容），使用通义千问 VL 系列
+model_vl = "qwen-vl-max"
+
 # 阿里通义千问的apikey，去dashscope获取
 qwen_apikey = "sk-5ab5c09182f74ba986be27330288c8de"
 

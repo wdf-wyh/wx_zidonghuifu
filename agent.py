@@ -1,3 +1,4 @@
+import os
 import logging
 from act.Entry import *
 from chat.Entry import *
@@ -16,6 +17,10 @@ name = None
 chat_shot = None
 history = init_history
 chat_text = ""
+captured_images = []  # 当前对话中截取的图片路径列表
+
+# 图片临时目录
+IMAGE_TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'images', 'temp')
 
 
 def execute(num):
@@ -27,6 +32,7 @@ def execute(num):
     global chat_shot
     global history
     global chat_text
+    global captured_images
     if num == "0":
         # 重新获得新消息
         time.sleep(1)
@@ -73,26 +79,82 @@ def execute(num):
             return "2"
         chat_text = get_chat_text(window)
         logger.info(f"State 3: chat_text ({len(chat_text)}chars): {chat_text[:200]}")
+
+        # 截取聊天中的图片
+        captured_images.clear()
+        image_lines = get_chat_images(window)
+        if image_lines:
+            logger.info(f"State 3: found {len(image_lines)} image(s), capturing...")
+            os.makedirs(IMAGE_TEMP_DIR, exist_ok=True)
+            for idx, img_line in enumerate(image_lines):
+                save_path = os.path.join(IMAGE_TEMP_DIR, f"{name}_{idx}.png")
+                result = capture_chat_image(img_line, save_path)
+                if result:
+                    captured_images.append(result)
+                # 每张图片之间留间隔，避免操作过快
+                time.sleep(0.3)
+            logger.info(f"State 3: captured {len(captured_images)} image(s) to temp dir")
         return "4"
     elif num == "4":
-        history_message_prompt = history_message_prompt_tp.format(name, datetime.now(),
-                                                                  chat_text, name)
+        if captured_images:
+            history_message_prompt = history_message_prompt_vl_tp.format(name, datetime.now(),
+                                                                        chat_text, name)
+            logger.info(f"State 4: using VL prompt (no image-send option)")
+        else:
+            history_message_prompt = history_message_prompt_tp.format(name, datetime.now(),
+                                                                     chat_text, name, name)
         history.append(history_message_prompt)
-        try:
-            history = do_chat_until_status(model, history)
-        except RuntimeError as e:
-            logger.error(f"State 4 model call failed: {e}")
-            return "0"
+
+        if captured_images:
+            # 有图片：使用多模态模型，让 AI 看到图片后决策
+            logger.info(f"State 4: using VL model with {len(captured_images)} image(s)")
+            try:
+                history = do_chat_multimodal_until_status(model_vl, history, captured_images)
+            except RuntimeError as e:
+                logger.error(f"State 4 VL model call failed: {e}")
+                return "0"
+            # 清理临时图片
+            _cleanup_temp_images()
+        else:
+            # 纯文本决策
+            try:
+                history = do_chat_until_status(model, history)
+            except RuntimeError as e:
+                logger.error(f"State 4 model call failed: {e}")
+                return "0"
+
         status = history[-1]
         return status
     elif num == "5":
-        input_prompt = input_prompt_tp
+        if captured_images:
+            input_prompt = vl_input_prompt_tp
+            logger.info(f"State 5: using VL model with {len(captured_images)} image(s) for text reply")
+        else:
+            input_prompt = input_prompt_tp
         history.append(input_prompt)
+
+        if captured_images:
+            try:
+                history = call_qwen_multimodal(history, captured_images, model_vl)
+            except Exception as e:
+                logger.error(f"State 5 VL model call failed: {e}")
+                try:
+                    history = do_chat(model, history)
+                except RuntimeError as e2:
+                    logger.error(f"State 5 fallback text call failed: {e2}")
+                    return "0"
+        else:
+            try:
+                history = do_chat(model, history)
+            except RuntimeError as e:
+                logger.error(f"State 5 model call failed: {e}")
+                return "0"
+        # 重新激活窗口，确保 EditControl 可定位
         try:
-            history = do_chat(model, history)
-        except RuntimeError as e:
-            logger.error(f"State 5 model call failed: {e}")
-            return "0"
+            window.SetActive()
+            time.sleep(0.5)
+        except:
+            pass
         try:
             send_msg(name, window, history[-1])
         except:
@@ -110,3 +172,90 @@ def execute(num):
         else:
             notify_list = notify_list[1:]
             return "1"
+
+    elif num == "6":
+        # AI 决定发送图片
+        image_prompt = image_prompt_tp
+        history.append(image_prompt)
+        try:
+            history = do_chat(model, history)
+        except RuntimeError as e:
+            logger.error(f"State 6 model call failed: {e}")
+            return "0"
+
+        image_choice = history[-1].strip().lower()
+        logger.info(f"State 6: AI chose image '{image_choice}'")
+
+        # 安全构建图片路径，防止目录穿越
+        image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'images')
+        image_path = None
+
+        # 按优先级尝试匹配：精确名称 → 默认图片
+        for ext in ['.png', '.jpg', '.jpeg', '.bmp', '.gif']:
+            candidate = os.path.normpath(os.path.join(image_dir, f"{image_choice}{ext}"))
+            # 安全检查：确保路径仍在 images 目录内
+            if candidate.startswith(image_dir) and os.path.isfile(candidate):
+                image_path = candidate
+                break
+
+        if image_path is None:
+            # 尝试用 default 图片
+            default_candidate = os.path.normpath(os.path.join(image_dir, "default.png"))
+            if default_candidate.startswith(image_dir) and os.path.isfile(default_candidate):
+                image_path = default_candidate
+                logger.warning(f"State 6: image '{image_choice}' not found, using default")
+
+        if image_path is not None:
+            try:
+                # 重新激活窗口
+                window.SetActive()
+                time.sleep(0.5)
+                send_image(name, window, image_path)
+                history.append(end_prompt_tp)
+                logger.info(f"State 6: sent image '{image_path}' to '{name}'")
+            except Exception as e:
+                logger.error(f"State 6 send_image failed: {e}")
+                return "0"
+        else:
+            # 没有可用图片，回退到文字回复
+            logger.warning(f"State 6: no image available, falling back to text reply")
+            history.append(input_prompt_tp)
+            try:
+                history = do_chat(model, history)
+            except RuntimeError as e:
+                logger.error(f"State 6 fallback text call failed: {e}")
+                return "0"
+            try:
+                send_msg(name, window, history[-1])
+            except:
+                return "0"
+
+        # 同 State 5 的清理逻辑
+        if len(notify_list) <= 1:
+            notify_list = []
+            try:
+                for item in chat_list:
+                    if '文件传输助手' in extract_chat_name(item):
+                        item.Click(simulateMove=False, waitTime=1)
+                        break
+            except:
+                pass
+            return "0"
+        else:
+            notify_list = notify_list[1:]
+            return "1"
+
+
+def _cleanup_temp_images():
+    """清理本次对话中截取的临时图片文件"""
+    # 注释掉清理逻辑，保留截图以便查看
+    # global captured_images
+    # for img_path in captured_images:
+    #     try:
+    #         if os.path.isfile(img_path):
+    #             os.remove(img_path)
+    #             logger.debug(f"Cleaned up temp image: {img_path}")
+    #     except Exception as e:
+    #         logger.warning(f"Failed to clean up temp image {img_path}: {e}")
+    # captured_images.clear()
+    pass

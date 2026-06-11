@@ -1,8 +1,13 @@
 import time
+import os
+import logging
 import uiautomation as auto
 import win32gui
+import mss
+from PIL import Image
 from act.tools import *
 from config import warn_word
+
 
 def find_wechat_hwnd():
     """查找微信主窗口句柄"""
@@ -24,7 +29,6 @@ def get_window():
     hwnd = find_wechat_hwnd()
     window = auto.ControlFromHandle(hwnd)
     window.SetActive()
-    window.SetTopmost()
     return window
 
 
@@ -100,6 +104,97 @@ def get_chat_lines(window):
     return chat_list
 
 
+def get_chat_images(window):
+    """从当前聊天中提取所有图片消息控件
+
+    Args:
+        window: 微信主窗口控件
+
+    Returns:
+        list: 图片消息的 chat_line 控件列表，以及对应的屏幕截图区域
+            每个元素为 (chat_line, bbox)
+    """
+    images = []
+    try:
+        msg_list = window.ListControl(Name='消息')
+        chat_lines = msg_list.GetChildren()
+    except:
+        chat_lines = window.ListControl(Name='会话').GetChildren()
+        msg_list = None
+
+    # 跳过第一条（通常是标题行）
+    if len(chat_lines) > 1:
+        chat_lines = chat_lines[1:]
+
+    for chat_line in chat_lines:
+        cn = chat_line.ClassName or ""
+        name = chat_line.Name or ""
+
+        is_image = (
+            'ChatBubbleReferItemView' in cn
+            or 'Image' in cn
+            or 'Picture' in cn
+            or '图片' in name
+            or '[图片]' in name
+        )
+
+        if not is_image:
+            continue
+
+        images.append(chat_line)
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Found {len(images)} image(s) in chat")
+    return images
+
+
+def capture_chat_image(chat_line, save_path):
+    """获取聊天中的图片
+
+    使用 mss 直接截取图片控件所在屏幕区域（支持多显示器）。
+    不点击、不打开任何窗口，完全不影响微信状态。
+
+    Args:
+        chat_line: 图片消息控件 (ListItemControl)
+        save_path: 截图保存路径
+
+    Returns:
+        str: 保存的文件路径，失败返回 None
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        rect = chat_line.BoundingRectangle
+        if not rect or rect.right <= rect.left or rect.bottom <= rect.top:
+            logger.warning("capture_chat_image: invalid bounding rect")
+            return None
+
+        # 用 mss 截取控件区域（支持多显示器虚拟坐标）
+        padding = 4
+        monitor = {
+            "left": rect.left - padding,
+            "top": rect.top - padding,
+            "width": (rect.right - rect.left) + padding * 2,
+            "height": (rect.bottom - rect.top) + padding * 2,
+        }
+        logger.info(f"capture_chat_image: mss grab region={monitor}")
+
+        with mss.mss() as sct:
+            sct_img = sct.grab(monitor)
+            screenshot = Image.frombytes("RGB", sct_img.size, sct_img.rgb)
+
+        logger.info(f"capture_chat_image: got image size={screenshot.size}")
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        screenshot.save(save_path, 'PNG')
+        file_size = os.path.getsize(save_path)
+        logger.info(f"capture_chat_image: saved to {save_path} ({screenshot.size}, {file_size} bytes)")
+        return save_path
+
+    except Exception as e:
+        logger.error(f"capture_chat_image failed: {e}")
+        return None
+
+
 def __to_text(tu):
     if tu is None:
         return None
@@ -114,6 +209,12 @@ def __to_text(tu):
             return tu[1] + " 说 " + tu[2]
         else:  # 无发送者（新版 1on1 直接显示内容）
             return tu[2]
+    elif tu[0] == "image":
+        # 图片消息，表示发送者发了一张图片
+        if tu[1]:  # 有发送者
+            return tu[1] + " 发送了一张图片"
+        else:
+            return "发送了一张图片"
     return None
 
 
@@ -123,9 +224,7 @@ def __classify_chat_type(chat_line):
 
     # WeChat 4.x (Electron 版) 控件结构
     if cn == 'mmui::ChatTextItemView':
-        # 文本消息：chat_line.Name 即为消息内容
         content = chat_line.Name.strip()
-        # 尝试从子控件中提取发送者
         sender = ""
         for child in children:
             if child.ControlTypeName in ('ButtonControl', 'TextControl') and child.Name:
@@ -134,18 +233,24 @@ def __classify_chat_type(chat_line):
         return "chat", sender, content
 
     if cn == 'mmui::ChatItemView':
-        # 系统消息/时间/拍一拍/撤回等
         if len(children) == 1 and children[0].ControlTypeName == 'TextControl':
             return "time", children[0].Name, None
-        # 检测"拍了拍"
         for child in children:
             if any(text in child.Name for text in ["拍了拍", "tickled"]):
                 return "nudge", child.Name, None
-        # 检测撤回
         for child in children:
             if any(text in child.Name for text in ["撤回了一条消息", "recalled a message"]):
                 return "recall", child.Name, None
         return None
+
+    # WeChat 4.x 图片消息：ClassName='mmui::ChatBubbleReferItemView'
+    if 'ChatBubbleReferItemView' in cn:
+        sender = ""
+        for child in children:
+            if child.ControlTypeName in ('ButtonControl', 'TextControl') and child.Name:
+                sender = child.Name.strip()
+                break
+        return "image", sender, None
 
     # 旧版 WeChat 兼容
     if len(children) == 1 and children[0].ControlTypeName == 'TextControl':
@@ -156,5 +261,14 @@ def __classify_chat_type(chat_line):
         return "recall", find_control_with_text_list(chat_line, ["撤回了一条消息", "recalled a message"]).Name, None
     elif find_control_with_control_type(chat_line, "ButtonControl") is not None:
         return "chat", find_control_with_control_type(chat_line, "ButtonControl").Name, chat_line.Name
+
+    name = chat_line.Name or ""
+    if '图片' in name or 'Image' in name or '[图片]' in name:
+        sender = ""
+        for child in children:
+            if child.ControlTypeName in ('ButtonControl', 'TextControl') and child.Name:
+                sender = child.Name.strip()
+                break
+        return "image", sender, None
 
     return None

@@ -2,3 +2,5 @@ dashscope==1.13.6
 PyAutoGUI==0.9.54
 pywin32==312
 uiautomation==2.0.18
+Pillow>=10.0.0
+mss>=10.0.0
