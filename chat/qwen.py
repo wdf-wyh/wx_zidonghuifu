@@ -195,3 +195,78 @@ def call_qwen_multimodal(his, image_paths, model_choice="qwen-vl-max"):
             except Exception:
                 continue
         return his
+
+
+def transcribe_speech(audio_path, model_choice="paraformer-v2"):
+    """使用阿里云 Paraformer 进行语音识别（ASR）
+
+    将录制的语音文件转写为文字，支持中文、英文等。
+
+    Args:
+        audio_path: WAV 音频文件路径（本地文件）
+        model_choice: ASR 模型名
+            - 'paraformer-v2': 非实时版，适合文件转写
+            - 'paraformer-realtime-v2': 实时版，也支持文件
+
+    Returns:
+        str: 识别出的文字文本，失败返回 None
+    """
+    if not os.path.isfile(audio_path):
+        logger.error(f"transcribe_speech: audio file not found: {audio_path}")
+        return None
+
+    try:
+        from dashscope.audio.asr import Transcription
+
+        # 本地文件用 file:// 协议
+        file_url = f"file://{os.path.abspath(audio_path)}"
+        logger.info(f"Transcribing speech via {model_choice}: {audio_path}")
+
+        # 新版 dashscope API 使用 file_urls 参数（列表）
+        result = Transcription.call(
+            model=model_choice,
+            file_urls=[file_url],
+        )
+
+        if result.status_code == HTTPStatus.OK:
+            # 兼容多种返回格式
+            text = ""
+
+            # 格式1: result.output.text
+            if hasattr(result, 'output'):
+                output = result.output
+                if isinstance(output, dict):
+                    text = output.get('text', '')
+                elif hasattr(output, 'text'):
+                    text = output.text
+
+            # 格式2: result.audio_text
+            if not text and hasattr(result, 'audio_text'):
+                text = result.audio_text
+
+            # 格式3: result 本身是 dict
+            if not text and isinstance(result, dict):
+                text = result.get('text', '') or result.get('output', {}).get('text', '')
+
+            # 格式4: result['output']['text']
+            if not text and isinstance(result, dict) and 'output' in result:
+                if isinstance(result['output'], dict):
+                    text = result['output'].get('text', '')
+
+            text = text.strip() if text else ""
+            if text:
+                logger.info(f"ASR result: '{text}'")
+                return text
+            else:
+                logger.warning(f"ASR returned empty text: {result}")
+                return None
+        else:
+            logger.error(f"ASR API failed: status={result.status_code}, message={getattr(result, 'message', 'unknown')}")
+            return None
+
+    except ImportError:
+        logger.error("transcribe_speech: dashscope.audio.asr.Transcription not available")
+        return None
+    except Exception as e:
+        logger.error(f"transcribe_speech exception: {e}")
+        return None

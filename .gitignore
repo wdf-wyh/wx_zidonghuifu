@@ -5,6 +5,11 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.egg
+*.whl
+*.so
+pip-log.txt
+pip-delete-this-directory.txt
 
 # Logs
 *.log
@@ -24,3 +29,20 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# PyInstaller build
+AI-Operating-Wechat.spec
+
+# Built executables
+*.exe
+
+# Built app bundle
+AI-Operating-Wechat_v1.0/
+
+# Temporary generated files
+images/temp/
+voices/temp/
+
+# .NET / C# build artifacts
+wasapi_recorder/bin/
+wasapi_recorder/obj/

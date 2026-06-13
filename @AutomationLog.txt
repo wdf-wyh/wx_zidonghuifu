@@ -64,3 +64,8 @@
 2026-06-10 18:40:44.635 writer.py[19] send_msg -> Find Control Timeout(1s): {Name: '石榴', ControlType: EditControl}
 2026-06-10 18:40:55.515 writer.py[19] send_msg -> Find Control Timeout(1s): {Name: '石榴', ControlType: EditControl}
 2026-06-10 18:41:04.864 writer.py[19] send_msg -> Find Control Timeout(1s): {Name: '石榴', ControlType: EditControl}
+2026-06-11 13:48:14.269 writer.py[20] send_msg -> Find Control Timeout(1s): {Name: '腾讯新闻', ControlType: EditControl}
+2026-06-11 14:00:11.161 writer.py[20] send_msg -> Find Control Timeout(1s): {Name: '尘埃飞舞', ControlType: EditControl}
+2026-06-11 14:04:05.560 writer.py[20] send_msg -> Find Control Timeout(1s): {Name: '尘埃飞舞', ControlType: EditControl}
+2026-06-11 16:54:54.841 writer.py[20] send_msg -> Find Control Timeout(1s): {Name: '尘埃飞舞', ControlType: EditControl}
+2026-06-11 18:55:27.869 writer.py[20] send_msg -> Find Control Timeout(1s): {Name: '腾讯新闻', ControlType: EditControl}

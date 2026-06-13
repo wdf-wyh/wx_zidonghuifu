@@ -195,6 +195,65 @@ def capture_chat_image(chat_line, save_path):
         return None
 
 
+def get_chat_voices(window):
+    """从当前聊天中提取所有语音消息控件
+
+    Args:
+        window: 微信主窗口控件
+
+    Returns:
+        list: 语音消息的 chat_line 控件列表
+    """
+    logger = logging.getLogger(__name__)
+    voices = []
+    try:
+        msg_list = window.ListControl(Name='消息')
+        chat_lines = msg_list.GetChildren()
+    except:
+        chat_lines = window.ListControl(Name='会话').GetChildren()
+
+    # 跳过第一条（通常是标题行）
+    if len(chat_lines) > 1:
+        chat_lines = chat_lines[1:]
+
+    for chat_line in chat_lines:
+        cn = chat_line.ClassName or ""
+        name = chat_line.Name or ""
+
+        is_voice = (
+            cn == 'mmui::ChatVoiceItemView'
+            or '[语音]' in name
+            or name.startswith('语音')
+        )
+
+        if not is_voice:
+            continue
+
+        voices.append(chat_line)
+
+    logger.info(f"Found {len(voices)} voice message(s) in chat")
+    return voices
+
+
+def save_chat_voice(chat_line, save_path):
+    """保存聊天中的语音消息文件
+
+    注意：微信 UI Automation 不暴露语音文件的本地路径。
+    当前先记录语音消息信息（发送者+时长），文件保存暂不可用。
+
+    Args:
+        chat_line: 语音消息控件 (ListItemControl)
+        save_path: 语音文件保存路径
+
+    Returns:
+        str: 保存的文件路径，失败返回 None（当前始终返回 None）
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"save_chat_voice: WeChat does not expose voice file path via UI automation. "
+                f"Voice file cannot be saved directly. (save_path={save_path})")
+    return None
+
+
 def __to_text(tu):
     if tu is None:
         return None
@@ -215,6 +274,13 @@ def __to_text(tu):
             return tu[1] + " 发送了一张图片"
         else:
             return "发送了一张图片"
+    elif tu[0] == "voice":
+        # 语音消息，包含发送者和时长信息
+        duration = f"（{tu[2]}）" if tu[2] else ""
+        if tu[1]:  # 有发送者
+            return tu[1] + f" 发送了一条语音消息{duration}"
+        else:
+            return f"发送了一条语音消息{duration}"
     return None
 
 
@@ -252,6 +318,29 @@ def __classify_chat_type(chat_line):
                 break
         return "image", sender, None
 
+    # WeChat 4.x (Electron 版) 语音消息：ClassName='mmui::ChatVoiceItemView'
+    # Name 格式如 '语音3"秒未播放' → 时长 3"
+    if cn == 'mmui::ChatVoiceItemView':
+        sender = ""
+        for child in children:
+            if child.ControlTypeName in ('ButtonControl', 'TextControl') and child.Name:
+                sender = child.Name.strip()
+                break
+        # 从 Name 中提取语音时长，格式如 "语音3\"秒未播放" → "3\"秒"
+        raw_name = chat_line.Name.strip() or ""
+        duration = ""
+        if '语音' in raw_name:
+            import re
+            m = re.search(r'语音(\d+[′\'"秒]*\d*["秒]*)', raw_name)
+            if m:
+                duration = m.group(1)
+            else:
+                # 兜底：取 "语音" 到 "秒" 之间的内容
+                m2 = re.search(r'语音(.+?)秒', raw_name)
+                if m2:
+                    duration = m2.group(1) + '"秒' if not m2.group(1).endswith('"') else m2.group(1) + '秒'
+        return "voice", sender, duration
+
     # 旧版 WeChat 兼容
     if len(children) == 1 and children[0].ControlTypeName == 'TextControl':
         return "time", children[0].Name, None
@@ -270,5 +359,14 @@ def __classify_chat_type(chat_line):
                 sender = child.Name.strip()
                 break
         return "image", sender, None
+
+    # 旧版 WeChat 语音消息兼容检测
+    if '语音' in name or '[语音]' in name:
+        sender = ""
+        for child in children:
+            if child.ControlTypeName in ('ButtonControl', 'TextControl') and child.Name:
+                sender = child.Name.strip()
+                break
+        return "voice", sender, name
 
     return None
