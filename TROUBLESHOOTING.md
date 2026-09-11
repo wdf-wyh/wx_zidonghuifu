@@ -1,5 +1,7 @@
 # AI-Operating-Wechat 问题排查手册
 
+> 配置入口：复制 `config.example.py` → `config.py`，复制 `.env.example` → `.env`，填写 `DASHSCOPE_API_KEY`。开 Issue 前请先对照本文。
+
 ## 1. 千问模型调用返回"嗨，有啥事？"等无关回复
 
 ### 现象

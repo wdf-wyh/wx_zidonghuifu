@@ -8,7 +8,8 @@ from config import *
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-dashscope.api_key = qwen_apikey
+_api_key = qwen_apikey or os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("QWEN_API_KEY") or ""
+dashscope.api_key = _api_key
 
 
 def call_qwen_online(his, model_choice):

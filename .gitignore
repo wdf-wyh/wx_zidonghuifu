@@ -21,8 +21,9 @@ pip-delete-this-directory.txt
 *.swp
 *.swo
 
-# Environment
+# Environment & local secrets
 .env
+config.py
 venv/
 .venv/
 

@@ -55,8 +55,13 @@ mkdir %RELEASE_DIR% >nul 2>&1
 :: 移动 exe
 move dist\AI-Operating-Wechat.exe %RELEASE_DIR% >nul 2>&1
 
-:: 复制 config（外置，方便修改 API Key）
-copy config.py %RELEASE_DIR% >nul 2>&1
+:: 外置配置：优先本地 config.py，否则用模板
+if exist config.py (
+    copy config.py %RELEASE_DIR% >nul 2>&1
+) else (
+    copy config.example.py %RELEASE_DIR%\config.py >nul 2>&1
+)
+if exist .env.example copy .env.example %RELEASE_DIR%\.env.example >nul 2>&1
 
 :: 清理构建缓存
 rd /s /q build 2>nul
@@ -67,14 +72,16 @@ rd /s /q dist 2>nul
 echo AI-Operating-Wechat v1.0 - 微信自动回复工具
 echo.
 echo === 使用方法 ===
-echo 1. 用记事本打开 config.py，填写你的阿里云 API Key
+echo 1. 复制 .env.example 为 .env，填写 DASHSCOPE_API_KEY
+echo    或编辑同目录 config.py 中的密钥相关项
 echo 2. 右键 AI-Operating-Wechat.exe - 以管理员身份运行
 echo 3. 打开微信聊天窗口，程序会自动检测并回复
 echo.
 echo === 注意事项 ===
 echo - 必须「以管理员身份运行」（操作微信 UI 需要）
-echo - config.py 可随时修改，无需重新打包
+echo - config.py / .env 可随时修改，无需重新打包
 echo - 首次运行会自动创建 voices/temp 和 images/temp
+echo - 切勿把含真实 Key 的文件上传到公开网盘或 Git
 )
 
 echo.

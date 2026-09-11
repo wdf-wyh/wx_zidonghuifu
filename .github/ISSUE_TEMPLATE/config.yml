@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting / 问题排查
+    url: https://github.com/wdf-wyh/wx_zidonghuifu/blob/main/TROUBLESHOOTING.md
+    about: Read common fixes before opening an issue
